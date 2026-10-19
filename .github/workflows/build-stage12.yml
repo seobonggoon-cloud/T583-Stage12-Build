@@ -1,4 +1,4 @@
-name: Build T583 Stage12 kernel
+name: Build T583 Stage13 kernel
 
 on:
   push:
@@ -15,13 +15,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y git bc bison flex libssl-dev make python3 cpio unzip zip device-tree-compiler
 
-      - name: Clone T583-capable Exynos7870 kernel source
+      - name: Clone newer T583-capable Exynos7870 kernel source
         run: |
-          git clone --depth=1 --branch lineage-17.0 https://github.com/Valera1978/android_kernel_samsung_exynos7870.git kernel
+          git clone --depth=1 --branch lineage-21 https://github.com/gtaxlwifi-los21/android_kernel_samsung_exynos7870.git kernel
           sed -i 's/^YYLTYPE yylloc;$/extern YYLTYPE yylloc;/' kernel/scripts/dtc/dtc-lexer.l || true
           sed -i 's/^YYLTYPE yylloc;$/extern YYLTYPE yylloc;/' kernel/scripts/dtc/dtc-lexer.lex.c_shipped || true
-          grep -n 'yylloc' kernel/scripts/dtc/dtc-lexer.l | head || true
-          grep -n 'yylloc' kernel/scripts/dtc/dtc-lexer.lex.c_shipped | head || true
 
       - name: Clone AArch64 GCC 4.9 toolchain
         run: |
@@ -29,9 +27,8 @@ jobs:
           cd toolchain
           git checkout android-8.1.0_r1 || git checkout android-8.0.0_r1 || true
           test -x bin/aarch64-linux-android-gcc
-          ./bin/aarch64-linux-android-gcc --version | head -1
 
-      - name: Configure and patch Android 11 requirements and T583 hardware
+      - name: Configure T583 Android userspace and hardware support
         working-directory: kernel
         shell: bash
         run: |
@@ -55,9 +52,6 @@ jobs:
           scripts/config --file "$CFG" --set-str ANDROID_BINDER_DEVICES 'binder,hwbinder,vndbinder'
           scripts/config --file "$CFG" --set-val SECURITY_SELINUX_CHECKREQPROT_VALUE 0 || true
 
-          # SM-T583 (gtaxladwifi) uses STMicro FTS1BA90A, while the T580 base
-          # defconfig enables FTS7. Do not leave both drivers competing for
-          # the same stm,fts_touch compatible node.
           scripts/config --file "$CFG" -d TOUCHSCREEN_FTS7
           scripts/config --file "$CFG" -d TOUCHSCREEN_FTS
           scripts/config --file "$CFG" -e TOUCHSCREEN_FTS1BA90A
@@ -82,21 +76,20 @@ jobs:
         run: |
           set -eux
           mkdir -p artifact/dtb
-          cp kernel/out/arch/arm64/boot/Image artifact/Image_STAGE12_T583_TOUCHFIX
-          cp kernel/out/.config artifact/config_STAGE12_T583_TOUCHFIX.txt
+          cp kernel/out/arch/arm64/boot/Image artifact/Image_STAGE13_T583_LOS21BASE
+          cp kernel/out/.config artifact/config_STAGE13_T583_LOS21BASE.txt
           find kernel/out/arch/arm64/boot/dts -type f -name '*gtaxladwifi*.dtb' -print -exec cp -v {} artifact/dtb/ \; || true
-          test -s artifact/Image_STAGE12_T583_TOUCHFIX
-          sha256sum artifact/Image_STAGE12_T583_TOUCHFIX artifact/config_STAGE12_T583_TOUCHFIX.txt > artifact/SHA256SUMS.txt
+          test -s artifact/Image_STAGE13_T583_LOS21BASE
+          sha256sum artifact/Image_STAGE13_T583_LOS21BASE artifact/config_STAGE13_T583_LOS21BASE.txt > artifact/SHA256SUMS.txt
           find artifact/dtb -type f -name '*.dtb' -exec sha256sum {} \; >> artifact/SHA256SUMS.txt || true
-          printf '%s\n' 'Stage12 touch-fix kernel build for SM-T583 (gtaxladwifi KOR).' > artifact/README.txt
-          printf '%s\n' 'T583 touchscreen: CONFIG_TOUCHSCREEN_FTS1BA90A=y; T580 FTS7 disabled.' >> artifact/README.txt
-          printf '%s\n' 'Kernel source: Valera1978/android_kernel_samsung_exynos7870 lineage-17.0.' >> artifact/README.txt
-          printf '%s\n' 'Do NOT flash Image directly as a boot partition; package it into boot.img first.' >> artifact/README.txt
+          printf '%s\n' 'Stage13 kernel for SM-T583 using the newer gtaxlwifi lineage-21 kernel base.' > artifact/README.txt
+          printf '%s\n' 'T583 touchscreen: CONFIG_TOUCHSCREEN_FTS1BA90A=y; FTS7 disabled.' >> artifact/README.txt
+          printf '%s\n' 'Kernel source: gtaxlwifi-los21/android_kernel_samsung_exynos7870 lineage-21.' >> artifact/README.txt
 
-      - name: Upload Stage12 artifact
+      - name: Upload Stage13 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: T583_STAGE12_TOUCHFIX_KERNEL
+          name: T583_STAGE13_LOS21BASE_KERNEL
           path: artifact/
           if-no-files-found: error
           retention-days: 30
