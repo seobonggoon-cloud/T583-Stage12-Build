@@ -31,7 +31,7 @@ jobs:
           test -x bin/aarch64-linux-android-gcc
           ./bin/aarch64-linux-android-gcc --version | head -1
 
-      - name: Configure and patch Android 11 requirements
+      - name: Configure and patch Android 11 requirements and T583 hardware
         working-directory: kernel
         shell: bash
         run: |
@@ -54,7 +54,18 @@ jobs:
           scripts/config --file "$CFG" -e ANDROID_BINDER_IPC
           scripts/config --file "$CFG" --set-str ANDROID_BINDER_DEVICES 'binder,hwbinder,vndbinder'
           scripts/config --file "$CFG" --set-val SECURITY_SELINUX_CHECKREQPROT_VALUE 0 || true
+
+          # SM-T583 (gtaxladwifi) uses STMicro FTS1BA90A, while the T580 base
+          # defconfig enables FTS7. Do not leave both drivers competing for
+          # the same stm,fts_touch compatible node.
+          scripts/config --file "$CFG" -d TOUCHSCREEN_FTS7
+          scripts/config --file "$CFG" -d TOUCHSCREEN_FTS
+          scripts/config --file "$CFG" -e TOUCHSCREEN_FTS1BA90A
+
           make O=out olddefconfig
+          grep -E 'CONFIG_TOUCHSCREEN_FTS(1BA90A|7)?=' out/.config || true
+          test "$(grep '^CONFIG_TOUCHSCREEN_FTS1BA90A=' out/.config)" = 'CONFIG_TOUCHSCREEN_FTS1BA90A=y'
+          ! grep -q '^CONFIG_TOUCHSCREEN_FTS7=y' out/.config
 
       - name: Build kernel and DTBs
         working-directory: kernel
@@ -71,21 +82,21 @@ jobs:
         run: |
           set -eux
           mkdir -p artifact/dtb
-          cp kernel/out/arch/arm64/boot/Image artifact/Image_STAGE12_T583
-          cp kernel/out/.config artifact/config_STAGE12_T583.txt
+          cp kernel/out/arch/arm64/boot/Image artifact/Image_STAGE12_T583_TOUCHFIX
+          cp kernel/out/.config artifact/config_STAGE12_T583_TOUCHFIX.txt
           find kernel/out/arch/arm64/boot/dts -type f -name '*gtaxladwifi*.dtb' -print -exec cp -v {} artifact/dtb/ \; || true
-          test -s artifact/Image_STAGE12_T583
-          sha256sum artifact/Image_STAGE12_T583 artifact/config_STAGE12_T583.txt > artifact/SHA256SUMS.txt
+          test -s artifact/Image_STAGE12_T583_TOUCHFIX
+          sha256sum artifact/Image_STAGE12_T583_TOUCHFIX artifact/config_STAGE12_T583_TOUCHFIX.txt > artifact/SHA256SUMS.txt
           find artifact/dtb -type f -name '*.dtb' -exec sha256sum {} \; >> artifact/SHA256SUMS.txt || true
-          printf '%s\n' 'Stage12 experimental kernel build for SM-T583 (gtaxladwifi KOR).' > artifact/README.txt
+          printf '%s\n' 'Stage12 touch-fix kernel build for SM-T583 (gtaxladwifi KOR).' > artifact/README.txt
+          printf '%s\n' 'T583 touchscreen: CONFIG_TOUCHSCREEN_FTS1BA90A=y; T580 FTS7 disabled.' >> artifact/README.txt
           printf '%s\n' 'Kernel source: Valera1978/android_kernel_samsung_exynos7870 lineage-17.0.' >> artifact/README.txt
-          printf '%s\n' 'Config base: lineage-gtaxlwifi_defconfig + Android 11 compatibility options.' >> artifact/README.txt
-          printf '%s\n' 'Do NOT flash Image directly as a boot partition; boot.img packaging is a separate validation step.' >> artifact/README.txt
+          printf '%s\n' 'Do NOT flash Image directly as a boot partition; package it into boot.img first.' >> artifact/README.txt
 
       - name: Upload Stage12 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: T583_STAGE12_KERNEL
+          name: T583_STAGE12_TOUCHFIX_KERNEL
           path: artifact/
           if-no-files-found: error
           retention-days: 30
