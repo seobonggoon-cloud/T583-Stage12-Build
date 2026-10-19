@@ -18,9 +18,11 @@ jobs:
       - name: Clone T583-capable Exynos7870 kernel source
         run: |
           git clone --depth=1 --branch lineage-17.0 https://github.com/Valera1978/android_kernel_samsung_exynos7870.git kernel
-          # Old kernel DTC sources fail with modern GCC because yylloc is emitted twice.
+          # This tree ships generated DTC lexer C, so patch both source and shipped C.
           sed -i 's/^YYLTYPE yylloc;$/extern YYLTYPE yylloc;/' kernel/scripts/dtc/dtc-lexer.l || true
+          sed -i 's/^YYLTYPE yylloc;$/extern YYLTYPE yylloc;/' kernel/scripts/dtc/dtc-lexer.lex.c || true
           grep -n 'yylloc' kernel/scripts/dtc/dtc-lexer.l | head || true
+          grep -n 'yylloc' kernel/scripts/dtc/dtc-lexer.lex.c | head || true
 
       - name: Clone AArch64 GCC 4.9 toolchain
         run: |
