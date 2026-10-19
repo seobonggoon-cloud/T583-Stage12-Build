@@ -1,4 +1,4 @@
-name: Build T583 Stage13 kernel
+name: Build T583 Stage14 kernel
 
 on:
   push:
@@ -28,7 +28,7 @@ jobs:
           git checkout android-8.1.0_r1 || git checkout android-8.0.0_r1 || true
           test -x bin/aarch64-linux-android-gcc
 
-      - name: Configure T583 Android userspace and hardware support
+      - name: Configure T583 Android userspace and isolate crashing touch IRQ driver
         working-directory: kernel
         shell: bash
         run: |
@@ -52,13 +52,15 @@ jobs:
           scripts/config --file "$CFG" --set-str ANDROID_BINDER_DEVICES 'binder,hwbinder,vndbinder'
           scripts/config --file "$CFG" --set-val SECURITY_SELINUX_CHECKREQPROT_VALUE 0 || true
 
+          # Stage13 last_kmsg proved a fatal exception in irq/4-fts_touch -> fts_event_handler_type_b.
+          # Disable both Samsung FTS implementations temporarily to prove Android userspace boot path.
           scripts/config --file "$CFG" -d TOUCHSCREEN_FTS7
           scripts/config --file "$CFG" -d TOUCHSCREEN_FTS
-          scripts/config --file "$CFG" -e TOUCHSCREEN_FTS1BA90A
+          scripts/config --file "$CFG" -d TOUCHSCREEN_FTS1BA90A
 
           make O=out olddefconfig
           grep -E 'CONFIG_TOUCHSCREEN_FTS(1BA90A|7)?=' out/.config || true
-          test "$(grep '^CONFIG_TOUCHSCREEN_FTS1BA90A=' out/.config)" = 'CONFIG_TOUCHSCREEN_FTS1BA90A=y'
+          ! grep -q '^CONFIG_TOUCHSCREEN_FTS1BA90A=y' out/.config
           ! grep -q '^CONFIG_TOUCHSCREEN_FTS7=y' out/.config
 
       - name: Build kernel and DTBs
@@ -76,20 +78,20 @@ jobs:
         run: |
           set -eux
           mkdir -p artifact/dtb
-          cp kernel/out/arch/arm64/boot/Image artifact/Image_STAGE13_T583_LOS21BASE
-          cp kernel/out/.config artifact/config_STAGE13_T583_LOS21BASE.txt
+          cp kernel/out/arch/arm64/boot/Image artifact/Image_STAGE14_T583_NOTOUCH
+          cp kernel/out/.config artifact/config_STAGE14_T583_NOTOUCH.txt
           find kernel/out/arch/arm64/boot/dts -type f -name '*gtaxladwifi*.dtb' -print -exec cp -v {} artifact/dtb/ \; || true
-          test -s artifact/Image_STAGE13_T583_LOS21BASE
-          sha256sum artifact/Image_STAGE13_T583_LOS21BASE artifact/config_STAGE13_T583_LOS21BASE.txt > artifact/SHA256SUMS.txt
+          test -s artifact/Image_STAGE14_T583_NOTOUCH
+          sha256sum artifact/Image_STAGE14_T583_NOTOUCH artifact/config_STAGE14_T583_NOTOUCH.txt > artifact/SHA256SUMS.txt
           find artifact/dtb -type f -name '*.dtb' -exec sha256sum {} \; >> artifact/SHA256SUMS.txt || true
-          printf '%s\n' 'Stage13 kernel for SM-T583 using the newer gtaxlwifi lineage-21 kernel base.' > artifact/README.txt
-          printf '%s\n' 'T583 touchscreen: CONFIG_TOUCHSCREEN_FTS1BA90A=y; FTS7 disabled.' >> artifact/README.txt
+          printf '%s\n' 'Stage14 isolation kernel for SM-T583.' > artifact/README.txt
+          printf '%s\n' 'Stage13 panic source: irq/4-fts_touch -> fts_event_handler_type_b; touch drivers disabled for boot isolation.' >> artifact/README.txt
           printf '%s\n' 'Kernel source: gtaxlwifi-los21/android_kernel_samsung_exynos7870 lineage-21.' >> artifact/README.txt
 
-      - name: Upload Stage13 artifact
+      - name: Upload Stage14 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: T583_STAGE13_LOS21BASE_KERNEL
+          name: T583_STAGE14_NOTOUCH_KERNEL
           path: artifact/
           if-no-files-found: error
           retention-days: 30
