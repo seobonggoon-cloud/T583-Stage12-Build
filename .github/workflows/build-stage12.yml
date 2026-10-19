@@ -1,0 +1,90 @@
+name: Build T583 Stage12 kernel
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git bc bison flex libssl-dev make python3 cpio unzip zip device-tree-compiler
+
+      - name: Clone T583-capable Exynos7870 kernel source
+        run: |
+          git clone --depth=1 --branch lineage-17.0 https://github.com/Valera1978/android_kernel_samsung_exynos7870.git kernel
+
+      - name: Clone AArch64 GCC 4.9 toolchain
+        run: |
+          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 toolchain
+
+      - name: Configure and patch Android 11 requirements
+        working-directory: kernel
+        shell: bash
+        run: |
+          export ARCH=arm64
+          export CROSS_COMPILE="$GITHUB_WORKSPACE/toolchain/bin/aarch64-linux-android-"
+          make O=out lineage-gtaxlwifi_defconfig
+          CFG=out/.config
+          scripts/config --file "$CFG" -e MEMCG
+          scripts/config --file "$CFG" -e MEMCG_SWAP || true
+          scripts/config --file "$CFG" -e MEMCG_SWAP_ENABLED || true
+          scripts/config --file "$CFG" -e EXT4_FS_POSIX_ACL
+          scripts/config --file "$CFG" -e EXT4_FS_SECURITY
+          scripts/config --file "$CFG" -e EXT4_ENCRYPTION || true
+          scripts/config --file "$CFG" -e CGROUPS
+          scripts/config --file "$CFG" -e CGROUP_CPUACCT
+          scripts/config --file "$CFG" -e SECCOMP
+          scripts/config --file "$CFG" -e SECCOMP_FILTER
+          scripts/config --file "$CFG" -e ANDROID_BINDER_IPC
+          scripts/config --file "$CFG" --set-str ANDROID_BINDER_DEVICES 'binder,hwbinder,vndbinder'
+          scripts/config --file "$CFG" --set-val SECURITY_SELINUX_CHECKREQPROT_VALUE 0 || true
+          yes '' | make O=out oldconfig
+          echo '===== Stage12 relevant config ====='
+          grep -E 'CONFIG_(ARM64|MEMCG|MEMCG_SWAP|EXT4_FS_POSIX_ACL|EXT4_FS_SECURITY|EXT4_ENCRYPTION|CGROUPS|SECCOMP|ANDROID_BINDER|SECURITY_SELINUX_CHECKREQPROT_VALUE)' out/.config || true
+
+      - name: Build kernel and DTBs
+        working-directory: kernel
+        shell: bash
+        run: |
+          export ARCH=arm64
+          export CROSS_COMPILE="$GITHUB_WORKSPACE/toolchain/bin/aarch64-linux-android-"
+          make O=out -j$(nproc) Image dtbs
+
+      - name: Collect T583 outputs
+        shell: bash
+        run: |
+          set -eux
+          mkdir -p artifact/dtb
+          cp kernel/out/arch/arm64/boot/Image artifact/Image_STAGE12_T583
+          cp kernel/out/.config artifact/config_STAGE12_T583.txt
+          find kernel/out/arch/arm64/boot/dts -type f \( -name '*gtaxladwifi*dtb' -o -name '*gtaxladwifi*.dtb' \) -print -exec cp -v {} artifact/dtb/ \; || true
+          if [ -z "$(find artifact/dtb -type f -name '*.dtb' -print -quit)" ]; then
+            echo 'No prebuilt gtaxladwifi DTBs found; compiling exact T583 DTS files manually'
+            DTC=kernel/out/scripts/dtc/dtc
+            CPP="$GITHUB_WORKSPACE/toolchain/bin/aarch64-linux-android-gcc"
+            for f in kernel/arch/arm64/boot/dts/exynos7870-gtaxladwifi_kor_open_00.dts kernel/arch/arm64/boot/dts/exynos7870-gtaxladwifi_kor_open_01.dts kernel/arch/arm64/boot/dts/exynos7870-gtaxladwifi_kor_open_02.dts; do
+              [ -f "$f" ] || continue
+              base=$(basename "$f" .dts)
+              $CPP -E -nostdinc -undef -D__DTS__ -x assembler-with-cpp -I kernel/include -I kernel/arch/arm64/boot/dts "$f" -o "/tmp/$base.dts.pre"
+              $DTC -I dts -O dtb -o "artifact/dtb/$base.dtb" "/tmp/$base.dts.pre"
+            done
+          fi
+          find artifact -maxdepth 2 -type f -exec sha256sum {} \; | tee artifact/SHA256SUMS.txt
+          printf '%s\n' 'Stage12 experimental kernel build for SM-T583 (gtaxladwifi KOR).' > artifact/README.txt
+          printf '%s\n' 'Kernel source: Valera1978/android_kernel_samsung_exynos7870 lineage-17.0.' >> artifact/README.txt
+          printf '%s\n' 'Config base: lineage-gtaxlwifi_defconfig + Android 11 compatibility options.' >> artifact/README.txt
+          printf '%s\n' 'T583 DTS variants are collected separately; do NOT flash Image directly as a boot partition.' >> artifact/README.txt
+
+      - name: Upload Stage12 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: T583_STAGE12_KERNEL
+          path: artifact/
+          if-no-files-found: error
+          retention-days: 30
