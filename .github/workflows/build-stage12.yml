@@ -18,11 +18,10 @@ jobs:
       - name: Clone T583-capable Exynos7870 kernel source
         run: |
           git clone --depth=1 --branch lineage-17.0 https://github.com/Valera1978/android_kernel_samsung_exynos7870.git kernel
-          # This tree ships generated DTC lexer C, so patch both source and shipped C.
           sed -i 's/^YYLTYPE yylloc;$/extern YYLTYPE yylloc;/' kernel/scripts/dtc/dtc-lexer.l || true
-          sed -i 's/^YYLTYPE yylloc;$/extern YYLTYPE yylloc;/' kernel/scripts/dtc/dtc-lexer.lex.c || true
+          sed -i 's/^YYLTYPE yylloc;$/extern YYLTYPE yylloc;/' kernel/scripts/dtc/dtc-lexer.lex.c_shipped || true
           grep -n 'yylloc' kernel/scripts/dtc/dtc-lexer.l | head || true
-          grep -n 'yylloc' kernel/scripts/dtc/dtc-lexer.lex.c | head || true
+          grep -n 'yylloc' kernel/scripts/dtc/dtc-lexer.lex.c_shipped | head || true
 
       - name: Clone AArch64 GCC 4.9 toolchain
         run: |
@@ -39,6 +38,7 @@ jobs:
           export ARCH=arm64
           export ANDROID_MAJOR_VERSION=p
           export CROSS_COMPILE="$GITHUB_WORKSPACE/toolchain/bin/aarch64-linux-android-"
+          export HOSTCFLAGS='-fcommon'
           make O=out lineage-gtaxlwifi_defconfig
           CFG=out/.config
           scripts/config --file "$CFG" -e MEMCG
@@ -55,8 +55,6 @@ jobs:
           scripts/config --file "$CFG" --set-str ANDROID_BINDER_DEVICES 'binder,hwbinder,vndbinder'
           scripts/config --file "$CFG" --set-val SECURITY_SELINUX_CHECKREQPROT_VALUE 0 || true
           make O=out olddefconfig
-          echo '===== Stage12 relevant config ====='
-          grep -E 'CONFIG_(ARM64|MEMCG|MEMCG_SWAP|EXT4_FS_POSIX_ACL|EXT4_FS_SECURITY|EXT4_ENCRYPTION|CGROUPS|SECCOMP|ANDROID_BINDER|SECURITY_SELINUX_CHECKREQPROT_VALUE)' out/.config || true
 
       - name: Build kernel and DTBs
         working-directory: kernel
@@ -65,6 +63,7 @@ jobs:
           export ARCH=arm64
           export ANDROID_MAJOR_VERSION=p
           export CROSS_COMPILE="$GITHUB_WORKSPACE/toolchain/bin/aarch64-linux-android-"
+          export HOSTCFLAGS='-fcommon'
           make O=out -j$(nproc) Image dtbs
 
       - name: Collect T583 outputs
