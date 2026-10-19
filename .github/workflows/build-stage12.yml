@@ -1,4 +1,4 @@
-name: Build T583 Stage14 kernel
+name: Build T583 Stage17 kernel
 
 on:
   push:
@@ -28,16 +28,18 @@ jobs:
           git checkout android-8.1.0_r1 || git checkout android-8.0.0_r1 || true
           test -x bin/aarch64-linux-android-gcc
 
-      - name: Configure T583 Android userspace and isolate crashing touch IRQ driver
+      - name: Configure Stage17 kernel
         working-directory: kernel
         shell: bash
         run: |
+          set -eux
           export ARCH=arm64
           export ANDROID_MAJOR_VERSION=p
           export CROSS_COMPILE="$GITHUB_WORKSPACE/toolchain/bin/aarch64-linux-android-"
           export HOSTCFLAGS='-fcommon'
           make O=out lineage-gtaxlwifi_defconfig
           CFG=out/.config
+
           scripts/config --file "$CFG" -e MEMCG
           scripts/config --file "$CFG" -e MEMCG_SWAP || true
           scripts/config --file "$CFG" -e MEMCG_SWAP_ENABLED || true
@@ -50,18 +52,28 @@ jobs:
           scripts/config --file "$CFG" -e SECCOMP_FILTER
           scripts/config --file "$CFG" -e ANDROID_BINDER_IPC
           scripts/config --file "$CFG" --set-str ANDROID_BINDER_DEVICES 'binder,hwbinder,vndbinder'
-          scripts/config --file "$CFG" --set-val SECURITY_SELINUX_CHECKREQPROT_VALUE 0 || true
 
-          # Stage13 last_kmsg proved a fatal exception in irq/4-fts_touch -> fts_event_handler_type_b.
-          # Disable both Samsung FTS implementations temporarily to prove Android userspace boot path.
+          # Stage13 touch IRQ panic isolation: keep FTS disabled for this boot test.
           scripts/config --file "$CFG" -d TOUCHSCREEN_FTS7
           scripts/config --file "$CFG" -d TOUCHSCREEN_FTS
           scripts/config --file "$CFG" -d TOUCHSCREEN_FTS1BA90A
 
+          # Stage14-16 reach Android init but die while compiling split SELinux policy.
+          # S-Boot ignores boot.img header cmdline additions, so disable SELinux by the
+          # kernel's own default bootparam value instead of relying on selinux=0 cmdline.
+          scripts/config --file "$CFG" -e SECURITY_SELINUX
+          scripts/config --file "$CFG" -e SECURITY_SELINUX_BOOTPARAM || true
+          scripts/config --file "$CFG" --set-val SECURITY_SELINUX_BOOTPARAM_VALUE 0 || true
+          scripts/config --file "$CFG" --set-val SECURITY_SELINUX_CHECKREQPROT_VALUE 0 || true
+
           make O=out olddefconfig
-          grep -E 'CONFIG_TOUCHSCREEN_FTS(1BA90A|7)?=' out/.config || true
+
+          echo '=== Stage17 relevant config ==='
+          grep -E 'CONFIG_SECURITY_SELINUX|CONFIG_TOUCHSCREEN_FTS' out/.config || true
           ! grep -q '^CONFIG_TOUCHSCREEN_FTS1BA90A=y' out/.config
           ! grep -q '^CONFIG_TOUCHSCREEN_FTS7=y' out/.config
+          grep -q '^CONFIG_SECURITY_SELINUX_BOOTPARAM=y' out/.config
+          grep -q '^CONFIG_SECURITY_SELINUX_BOOTPARAM_VALUE=0' out/.config
 
       - name: Build kernel and DTBs
         working-directory: kernel
@@ -73,25 +85,25 @@ jobs:
           export HOSTCFLAGS='-fcommon'
           make O=out -j$(nproc) Image dtbs
 
-      - name: Collect T583 outputs
+      - name: Collect Stage17 outputs
         shell: bash
         run: |
           set -eux
           mkdir -p artifact/dtb
-          cp kernel/out/arch/arm64/boot/Image artifact/Image_STAGE14_T583_NOTOUCH
-          cp kernel/out/.config artifact/config_STAGE14_T583_NOTOUCH.txt
+          cp kernel/out/arch/arm64/boot/Image artifact/Image_STAGE17_T583_NOSELINUX_NOTOUCH
+          cp kernel/out/.config artifact/config_STAGE17_T583_NOSELINUX_NOTOUCH.txt
           find kernel/out/arch/arm64/boot/dts -type f -name '*gtaxladwifi*.dtb' -print -exec cp -v {} artifact/dtb/ \; || true
-          test -s artifact/Image_STAGE14_T583_NOTOUCH
-          sha256sum artifact/Image_STAGE14_T583_NOTOUCH artifact/config_STAGE14_T583_NOTOUCH.txt > artifact/SHA256SUMS.txt
+          test -s artifact/Image_STAGE17_T583_NOSELINUX_NOTOUCH
+          sha256sum artifact/Image_STAGE17_T583_NOSELINUX_NOTOUCH artifact/config_STAGE17_T583_NOSELINUX_NOTOUCH.txt > artifact/SHA256SUMS.txt
           find artifact/dtb -type f -name '*.dtb' -exec sha256sum {} \; >> artifact/SHA256SUMS.txt || true
-          printf '%s\n' 'Stage14 isolation kernel for SM-T583.' > artifact/README.txt
-          printf '%s\n' 'Stage13 panic source: irq/4-fts_touch -> fts_event_handler_type_b; touch drivers disabled for boot isolation.' >> artifact/README.txt
-          printf '%s\n' 'Kernel source: gtaxlwifi-los21/android_kernel_samsung_exynos7870 lineage-21.' >> artifact/README.txt
+          printf '%s\n' 'Stage17 boot-isolation kernel for SM-T583.' > artifact/README.txt
+          printf '%s\n' 'Touch remains disabled; SELinux default bootparam value forced to 0 in kernel config.' >> artifact/README.txt
+          printf '%s\n' 'Purpose: bypass Stage14-16 secilc genfscon fatal reboot without relying on Samsung S-Boot cmdline.' >> artifact/README.txt
 
-      - name: Upload Stage14 artifact
+      - name: Upload Stage17 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: T583_STAGE14_NOTOUCH_KERNEL
+          name: T583_STAGE17_NOSELINUX_NOTOUCH_KERNEL
           path: artifact/
           if-no-files-found: error
           retention-days: 30
