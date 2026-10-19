@@ -16,7 +16,11 @@ jobs:
           sudo apt-get install -y git bc bison flex libssl-dev make python3 cpio unzip zip device-tree-compiler
 
       - name: Clone T583-capable Exynos7870 kernel source
-        run: git clone --depth=1 --branch lineage-17.0 https://github.com/Valera1978/android_kernel_samsung_exynos7870.git kernel
+        run: |
+          git clone --depth=1 --branch lineage-17.0 https://github.com/Valera1978/android_kernel_samsung_exynos7870.git kernel
+          # Old kernel DTC sources fail with modern GCC because yylloc is emitted twice.
+          sed -i 's/^YYLTYPE yylloc;$/extern YYLTYPE yylloc;/' kernel/scripts/dtc/dtc-lexer.l || true
+          grep -n 'yylloc' kernel/scripts/dtc/dtc-lexer.l | head || true
 
       - name: Clone AArch64 GCC 4.9 toolchain
         run: |
