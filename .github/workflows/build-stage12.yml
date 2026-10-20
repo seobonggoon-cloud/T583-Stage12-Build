@@ -1,4 +1,4 @@
-name: Build T583 Stage17 kernel
+name: Build T583 Stage21 kernel
 
 on:
   push:
@@ -28,7 +28,7 @@ jobs:
           git checkout android-8.1.0_r1 || git checkout android-8.0.0_r1 || true
           test -x bin/aarch64-linux-android-gcc
 
-      - name: Configure Stage17 kernel
+      - name: Configure Stage21 kernel
         working-directory: kernel
         shell: bash
         run: |
@@ -40,27 +40,41 @@ jobs:
           make O=out lineage-gtaxlwifi_defconfig
           CFG=out/.config
 
+          # Android 11 base requirements already proven useful in Stage14/19.
           scripts/config --file "$CFG" -e MEMCG
           scripts/config --file "$CFG" -e MEMCG_SWAP || true
           scripts/config --file "$CFG" -e MEMCG_SWAP_ENABLED || true
           scripts/config --file "$CFG" -e EXT4_FS_POSIX_ACL
           scripts/config --file "$CFG" -e EXT4_FS_SECURITY
           scripts/config --file "$CFG" -e EXT4_ENCRYPTION || true
-          scripts/config --file "$CFG" -e CGROUPS
-          scripts/config --file "$CFG" -e CGROUP_CPUACCT
           scripts/config --file "$CFG" -e SECCOMP
           scripts/config --file "$CFG" -e SECCOMP_FILTER
           scripts/config --file "$CFG" -e ANDROID_BINDER_IPC
           scripts/config --file "$CFG" --set-str ANDROID_BINDER_DEVICES 'binder,hwbinder,vndbinder'
 
-          # Stage13 touch IRQ panic isolation: keep FTS disabled for this boot test.
+          # Stage20 gets through property init, then Android 11 libprocessgroup reports
+          # missing cpuset/freezer/schedtune mounts before init dies in SubcontextChildReap.
+          # Enable every legacy cgroup controller this 3.18 tree exposes so libprocessgroup
+          # can use the Android legacy hierarchy even though true cgroup2 is unavailable.
+          scripts/config --file "$CFG" -e CGROUPS
+          scripts/config --file "$CFG" -e CGROUP_SCHED
+          scripts/config --file "$CFG" -e FAIR_GROUP_SCHED
+          scripts/config --file "$CFG" -e CPUSETS
+          scripts/config --file "$CFG" -e CGROUP_CPUACCT
+          scripts/config --file "$CFG" -e CGROUP_FREEZER
+          scripts/config --file "$CFG" -e CGROUP_DEVICE
+          scripts/config --file "$CFG" -e CGROUP_PERF || true
+          scripts/config --file "$CFG" -e BLK_CGROUP || true
+          scripts/config --file "$CFG" -e CGROUP_PIDS || true
+          scripts/config --file "$CFG" -e SCHED_TUNE || true
+
+          # Keep Stage14 touch IRQ panic isolated for boot bring-up.
           scripts/config --file "$CFG" -d TOUCHSCREEN_FTS7
           scripts/config --file "$CFG" -d TOUCHSCREEN_FTS
           scripts/config --file "$CFG" -d TOUCHSCREEN_FTS1BA90A
 
-          # Stage14-16 reach Android init but die while compiling split SELinux policy.
-          # S-Boot ignores boot.img header cmdline additions, so disable SELinux by the
-          # kernel's own default bootparam value instead of relying on selinux=0 cmdline.
+          # SELinux must remain present. Stage18 vendor genfscon patch now lets A11 policy
+          # compile/load successfully; disabling SELinux makes first-stage init fail.
           scripts/config --file "$CFG" -e SECURITY_SELINUX
           scripts/config --file "$CFG" -e SECURITY_SELINUX_BOOTPARAM || true
           scripts/config --file "$CFG" --set-val SECURITY_SELINUX_BOOTPARAM_VALUE 0 || true
@@ -68,12 +82,20 @@ jobs:
 
           make O=out olddefconfig
 
-          echo '=== Stage17 relevant config ==='
-          grep -E 'CONFIG_SECURITY_SELINUX|CONFIG_TOUCHSCREEN_FTS' out/.config || true
+          echo '=== Stage21 cgroup/SELinux/touch config ==='
+          grep -E 'CONFIG_(CGROUPS|CGROUP_SCHED|FAIR_GROUP_SCHED|CPUSETS|CGROUP_CPUACCT|CGROUP_FREEZER|CGROUP_DEVICE|CGROUP_PERF|BLK_CGROUP|CGROUP_PIDS|SCHED_TUNE|SECURITY_SELINUX|TOUCHSCREEN_FTS)' out/.config || true
+
+          # Hard requirements known to exist in this kernel tree.
+          grep -q '^CONFIG_CGROUPS=y' out/.config
+          grep -q '^CONFIG_CGROUP_SCHED=y' out/.config
+          grep -q '^CONFIG_FAIR_GROUP_SCHED=y' out/.config
+          grep -q '^CONFIG_CPUSETS=y' out/.config
+          grep -q '^CONFIG_CGROUP_CPUACCT=y' out/.config
+          grep -q '^CONFIG_CGROUP_FREEZER=y' out/.config
+          grep -q '^CONFIG_CGROUP_DEVICE=y' out/.config
+          grep -q '^CONFIG_SECURITY_SELINUX=y' out/.config
           ! grep -q '^CONFIG_TOUCHSCREEN_FTS1BA90A=y' out/.config
           ! grep -q '^CONFIG_TOUCHSCREEN_FTS7=y' out/.config
-          grep -q '^CONFIG_SECURITY_SELINUX_BOOTPARAM=y' out/.config
-          grep -q '^CONFIG_SECURITY_SELINUX_BOOTPARAM_VALUE=0' out/.config
 
       - name: Build kernel and DTBs
         working-directory: kernel
@@ -85,25 +107,25 @@ jobs:
           export HOSTCFLAGS='-fcommon'
           make O=out -j$(nproc) Image dtbs
 
-      - name: Collect Stage17 outputs
+      - name: Collect Stage21 outputs
         shell: bash
         run: |
           set -eux
           mkdir -p artifact/dtb
-          cp kernel/out/arch/arm64/boot/Image artifact/Image_STAGE17_T583_NOSELINUX_NOTOUCH
-          cp kernel/out/.config artifact/config_STAGE17_T583_NOSELINUX_NOTOUCH.txt
+          cp kernel/out/arch/arm64/boot/Image artifact/Image_STAGE21_T583_CGROUP_NOTOUCH
+          cp kernel/out/.config artifact/config_STAGE21_T583_CGROUP_NOTOUCH.txt
           find kernel/out/arch/arm64/boot/dts -type f -name '*gtaxladwifi*.dtb' -print -exec cp -v {} artifact/dtb/ \; || true
-          test -s artifact/Image_STAGE17_T583_NOSELINUX_NOTOUCH
-          sha256sum artifact/Image_STAGE17_T583_NOSELINUX_NOTOUCH artifact/config_STAGE17_T583_NOSELINUX_NOTOUCH.txt > artifact/SHA256SUMS.txt
+          test -s artifact/Image_STAGE21_T583_CGROUP_NOTOUCH
+          sha256sum artifact/Image_STAGE21_T583_CGROUP_NOTOUCH artifact/config_STAGE21_T583_CGROUP_NOTOUCH.txt > artifact/SHA256SUMS.txt
           find artifact/dtb -type f -name '*.dtb' -exec sha256sum {} \; >> artifact/SHA256SUMS.txt || true
-          printf '%s\n' 'Stage17 boot-isolation kernel for SM-T583.' > artifact/README.txt
-          printf '%s\n' 'Touch remains disabled; SELinux default bootparam value forced to 0 in kernel config.' >> artifact/README.txt
-          printf '%s\n' 'Purpose: bypass Stage14-16 secilc genfscon fatal reboot without relying on Samsung S-Boot cmdline.' >> artifact/README.txt
+          printf '%s\n' 'Stage21 boot kernel for SM-T583.' > artifact/README.txt
+          printf '%s\n' 'Stage18/20 vendor policy/property patches must remain applied on-device.' >> artifact/README.txt
+          printf '%s\n' 'Touch remains disabled while enabling Android 11 legacy cgroup controllers (cpuset/freezer/device/etc.).' >> artifact/README.txt
 
-      - name: Upload Stage17 artifact
+      - name: Upload Stage21 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: T583_STAGE17_NOSELINUX_NOTOUCH_KERNEL
+          name: T583_STAGE21_CGROUP_NOTOUCH_KERNEL
           path: artifact/
           if-no-files-found: error
           retention-days: 30
