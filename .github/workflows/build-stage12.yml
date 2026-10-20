@@ -40,7 +40,6 @@ jobs:
           make O=out lineage-gtaxlwifi_defconfig
           CFG=out/.config
 
-          # Android 11 base requirements already proven useful in Stage14/19.
           scripts/config --file "$CFG" -e MEMCG
           scripts/config --file "$CFG" -e MEMCG_SWAP || true
           scripts/config --file "$CFG" -e MEMCG_SWAP_ENABLED || true
@@ -52,10 +51,6 @@ jobs:
           scripts/config --file "$CFG" -e ANDROID_BINDER_IPC
           scripts/config --file "$CFG" --set-str ANDROID_BINDER_DEVICES 'binder,hwbinder,vndbinder'
 
-          # Stage20 gets through property init, then Android 11 libprocessgroup reports
-          # missing cpuset/freezer/schedtune mounts before init dies in SubcontextChildReap.
-          # Enable every legacy cgroup controller this 3.18 tree exposes so libprocessgroup
-          # can use the Android legacy hierarchy even though true cgroup2 is unavailable.
           scripts/config --file "$CFG" -e CGROUPS
           scripts/config --file "$CFG" -e CGROUP_SCHED
           scripts/config --file "$CFG" -e FAIR_GROUP_SCHED
@@ -68,16 +63,16 @@ jobs:
           scripts/config --file "$CFG" -e CGROUP_PIDS || true
           scripts/config --file "$CFG" -e SCHED_TUNE || true
 
-          # Keep Stage14 touch IRQ panic isolated for boot bring-up.
           scripts/config --file "$CFG" -d TOUCHSCREEN_FTS7
           scripts/config --file "$CFG" -d TOUCHSCREEN_FTS
           scripts/config --file "$CFG" -d TOUCHSCREEN_FTS1BA90A
 
-          # SELinux must remain present. Stage18 vendor genfscon patch now lets A11 policy
-          # compile/load successfully; disabling SELinux makes first-stage init fail.
+          # Android 11 first-stage init requires selinuxfs to exist. Stage17 proved that
+          # BOOTPARAM_VALUE=0 disables SELinux too early and makes init abort before policy load.
+          # Keep the Stage14 behavior: SELinux present, default bootparam enabled, checkreqprot=0.
           scripts/config --file "$CFG" -e SECURITY_SELINUX
           scripts/config --file "$CFG" -e SECURITY_SELINUX_BOOTPARAM || true
-          scripts/config --file "$CFG" --set-val SECURITY_SELINUX_BOOTPARAM_VALUE 0 || true
+          scripts/config --file "$CFG" --set-val SECURITY_SELINUX_BOOTPARAM_VALUE 1 || true
           scripts/config --file "$CFG" --set-val SECURITY_SELINUX_CHECKREQPROT_VALUE 0 || true
 
           make O=out olddefconfig
@@ -85,7 +80,6 @@ jobs:
           echo '=== Stage21 cgroup/SELinux/touch config ==='
           grep -E 'CONFIG_(CGROUPS|CGROUP_SCHED|FAIR_GROUP_SCHED|CPUSETS|CGROUP_CPUACCT|CGROUP_FREEZER|CGROUP_DEVICE|CGROUP_PERF|BLK_CGROUP|CGROUP_PIDS|SCHED_TUNE|SECURITY_SELINUX|TOUCHSCREEN_FTS)' out/.config || true
 
-          # Hard requirements known to exist in this kernel tree.
           grep -q '^CONFIG_CGROUPS=y' out/.config
           grep -q '^CONFIG_CGROUP_SCHED=y' out/.config
           grep -q '^CONFIG_FAIR_GROUP_SCHED=y' out/.config
@@ -94,6 +88,7 @@ jobs:
           grep -q '^CONFIG_CGROUP_FREEZER=y' out/.config
           grep -q '^CONFIG_CGROUP_DEVICE=y' out/.config
           grep -q '^CONFIG_SECURITY_SELINUX=y' out/.config
+          grep -q '^CONFIG_SECURITY_SELINUX_BOOTPARAM_VALUE=1' out/.config
           ! grep -q '^CONFIG_TOUCHSCREEN_FTS1BA90A=y' out/.config
           ! grep -q '^CONFIG_TOUCHSCREEN_FTS7=y' out/.config
 
